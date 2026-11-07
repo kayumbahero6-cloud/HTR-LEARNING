@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// EduLearn: Firestore rules for the optional online copy of study data.
+//
+// What these rules do
+//  - Every legitimate write is accepted: the app signs in to Firebase anonymously and then writes
+//    edulearn_users/{id} and edulearn_users/{id}/data/{notes|decks|planner|calendar}.
+//  - Anyone without a Firebase session (a script or stranger hitting your project) is refused.
+//  - Only that one path and those four document names are allowed, with a size and shape check.
+//  - Everything else in the project is closed.
+//
+// What these rules cannot do
+//  - They cannot tell whether an email address is real. Firestore never sees emails. That check
+//    happens in the EduLearn server (format, typo domains, disposable domains, DNS mail record) and
+//    an account cannot sign in until the person clicks the link emailed to them.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    match /edulearn_users/{userId} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'role', 'updatedAt']);
+      allow delete: if false;
+
+      match /data/{docId} {
+        allow read: if signedIn();
+        allow create, update: if signedIn()
+          && docId in ['notes', 'decks', 'planner', 'calendar']
+          && request.resource.data.keys().hasOnly(['path', 'json', 'savedAt'])
+          && request.resource.data.path is string
+          && request.resource.data.json is string
+          && request.resource.data.json.size() < 950000
+          && request.resource.data.savedAt is number;
+        allow delete: if false;
+      }
+    }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}
