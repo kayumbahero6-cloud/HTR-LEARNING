@@ -107,3 +107,20 @@ In production the server uses the Firebase web config already in `public/config.
 - Password changes and account deletion are applied in Firebase too.
 - **One-time setup in the Firebase console**: Authentication → Get started → Sign-in method → turn on **Email/Password**. Optionally edit Authentication → Templates → Email address verification (sender name, language, message). Until Email/Password is on, the server logs a warning and uses the other email options instead.
 - What this does not cover: learning data (progress, results, notes) still lives in the server's database. On Render that needs a paid plan with a persistent disk (see `render.yaml`), otherwise it resets when the instance restarts. The Firestore copy of notes, decks, planner and calendar (Data & sync page) is separate.
+
+## Ready-made content and looks (what was added, counted by the code)
+
+| Where | What | Count |
+|---|---|---|
+| Personalise → Colour theme | 16 hand-made + 84 generated (12 hues × 7 moods) | 100 |
+| Personalise → Backgrounds | 23 hand-made + 120 generated (12 patterns × 10 colours) | 143 |
+| Personalise → Avatar frame | 10 styles × 10 colours + 8 classics | 108 |
+| Personalise → Page transitions | 10 movements × 10 speeds | 100 |
+| Personalise → Celebrations | 10 kinds of confetti × 10 movements | 100 |
+| Personalise → Hover effects | 10 effects × 10 strengths | 100 |
+| Study → Tasks | task ideas (10 subjects × 10 kinds) | 100 |
+| Study (top) | study tips in 10 themes | 100 |
+| Study → Flashcards → Starter decks | 6 decks (times tables, squares, cubes, primes, fractions to %, irregular verbs), answers computed | 250 cards |
+| Calendar → Add event | event templates (10 kinds × 10 subjects) | 100 |
+
+Most of these are combinations (for example 10 movements at 10 speeds), not 100 separate hand-made designs. `tests/content.test.js` checks the counts, uniqueness and that flashcard answers are correct. Content tables are in `public/js/content.js` and `public/js/looks.js`.

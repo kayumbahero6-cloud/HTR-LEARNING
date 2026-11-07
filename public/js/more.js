@@ -1,6 +1,7 @@
 import { S, h, mount, GET, POST, PUT, DEL, toast, fail, icon, loading, empty, setTitle, fmtDate, fmtDay, ago, confirmBox, askText, dialog } from './core.js';
 import { route, go, onLeave } from './router.js';
 import { celebrate } from './looks.js';
+import { TASK_IDEAS, SUBJECTS, CAL_IDEAS, STARTER_DECKS, STUDY_TIPS, TIP_THEMES } from './content.js';
 
 const tabsBar = (items, cur, hrefFor) => h('div', { class: 'tabs', role: 'tablist' }, items.map(([k, l]) => h('button', { role: 'tab', 'aria-selected': String(k === cur), onclick: () => go(hrefFor(k)) }, l)));
 const toLocalInput = ms => { const d = new Date(ms - new Date().getTimezoneOffset() * 60e3); return d.toISOString().slice(0, 16); };
@@ -22,7 +23,8 @@ route('/calendar', async ({ query }) => {
   const add = (day) => {
     const f = { title: h('input', { maxlength: 120, placeholder: 'Event title' }), at: h('input', { type: 'datetime-local', value: toLocalInput((day || new Date()).setHours(9, 0, 0, 0)) }), kind: h('select', ['event', 'exam', 'lesson', 'meeting', 'holiday'].map(k => h('option', { value: k }, k))), notes: h('textarea', { maxlength: 1000, rows: 3 }),
       cls: h('select', h('option', { value: '' }, 'Only me'), classes.map(c => h('option', { value: c.id }, 'Class: ' + c.name))) };
-    dialog({ title: 'Add to calendar', body: h('div', { class: 'stack' }, field('Title', f.title), field('When', f.at), field('Type', f.kind), classes.length > 0 && field('Visible to', f.cls), field('Notes', f.notes)),
+    const tpl = h('select', { 'aria-label': 'Event template', onchange: e => { const x = CAL_IDEAS[Number(e.target.value)]; if (x) { f.title.value = x.title; f.kind.value = x.kind; } } }, h('option', { value: '' }, `Start from a template (${CAL_IDEAS.length})`), SUBJECTS.map(sj => h('optgroup', { label: sj }, CAL_IDEAS.map((x, i) => [x, i]).filter(([x]) => x.subject === sj).map(([x, i]) => h('option', { value: String(i) }, x.title)))));
+    dialog({ title: 'Add to calendar', body: h('div', { class: 'stack' }, field('Template', tpl), field('Title', f.title), field('When', f.at), field('Type', f.kind), classes.length > 0 && field('Visible to', f.cls), field('Notes', f.notes)),
       actions: [{ label: 'Cancel' }, { label: 'Add', kind: 'primary', close: false, onClick: async close => { try { await POST('/calendar', { title: f.title.value, starts_at: fromLocalInput(f.at.value), kind: f.kind.value, notes: f.notes.value, classroom_id: f.cls.value || undefined }); close(); toast('Added', 'ok'); go(`/calendar?y=${y}&m=${m}&r=${Date.now()}`); } catch (e) { fail(e); return false; } } }] });
   };
   const cells = []; for (let i = 0; i < 42; i++) {
@@ -61,13 +63,24 @@ route('/messages', async ({ query }) => {
 });
 
 /* ============================================================ study hub: planner, flashcards, notes, tasks */
+function tipCard() {
+  let i = Math.floor(Date.now() / 864e5) % STUDY_TIPS.length, theme = '';
+  const text = h('p', { class: 'tip-text' }), tag = h('span', { class: 'chip plain' });
+  const pool = () => STUDY_TIPS.map((t, k) => [t, k]).filter(([t]) => !theme || t.theme === theme);
+  const show = () => { const t = STUDY_TIPS[i]; text.textContent = t.text; tag.textContent = t.theme; };
+  const sel = h('select', { 'aria-label': 'Tip theme', onchange: e => { theme = e.target.value; const p = pool(); i = p[Math.floor(Math.random() * p.length)][1]; show(); } }, h('option', { value: '' }, `All themes (${STUDY_TIPS.length} tips)`), TIP_THEMES.map(t => h('option', { value: t }, t)));
+  show();
+  return h('div', { class: 'tipcard' }, h('div', { class: 'tip-body' }, h('div', { class: 'row' }, h('strong', 'Study tip'), tag), text),
+    h('div', { class: 'row' }, sel, h('button', { class: 'btn sm', type: 'button', onclick: () => { const p = pool(); i = p[Math.floor(Math.random() * p.length)][1]; show(); } }, 'Another tip')));
+}
+
 route('/study', async ({ query }) => {
   setTitle('Study');
   const tab = ['planner', 'cards', 'notes', 'tasks'].includes(query.tab) ? query.tab : 'planner';
   const body = h('div', loading());
   const tabs = tabsBar([['planner', 'Planner'], ['cards', 'Flashcards'], ['notes', 'Notes'], ['tasks', 'Tasks']], tab, k => '/study?tab=' + k);
   ({ planner, cards, notes, tasks }[tab])(body, query).catch(e => mount(body, h('div', { class: 'banner err' }, e.message)));
-  return h('div', { class: 'page' }, pageHead('Study', 'Plan your time, memorise with flashcards, keep notes and track tasks.'), tabs, body);
+  return h('div', { class: 'page' }, pageHead('Study', 'Plan your time, memorise with flashcards, keep notes and track tasks.'), tipCard(), tabs, body);
 });
 
 async function planner(body) {
@@ -98,7 +111,9 @@ async function cards(body, query) {
   if (query.deck) return studyDeck(body, Number(query.deck), query.mode);
   const r = await GET('/decks');
   const create = async () => { const t = await askText('New flashcard deck', { label: 'Deck name', multiline: false, yes: 'Create', required: 2 }); if (!t) return; try { const x = await POST('/decks', { title: t }); go('/study?tab=cards&deck=' + x.id + '&mode=edit'); } catch (e) { fail(e); } };
-  mount(body, h('div', { class: 'row', style: { marginBottom: '1rem' } }, h('button', { class: 'btn primary', type: 'button', onclick: create }, 'New deck')),
+  const starters = () => dialog({ title: 'Starter decks', body: h('div', { class: 'stack' }, h('p', { class: 'muted' }, `${STARTER_DECKS.length} ready-made decks, ${STARTER_DECKS.reduce((n, d) => n + d.cards.length, 0)} cards in all. Every answer is calculated by the app.`),
+    STARTER_DECKS.map(d => h('div', { class: 'item' }, h('div', { class: 'grow' }, h('strong', d.title), h('span', { class: 'meta' }, `${d.subject}, ${d.cards.length} cards`)), h('button', { class: 'btn sm primary', type: 'button', onclick: async ev => { ev.target.disabled = true; try { const x = await POST('/decks', { title: d.title, subject: d.subject }); for (let k = 0; k < d.cards.length; k += 100) await POST('/decks/' + x.id + '/cards', { cards: d.cards.slice(k, k + 100).map(([front, back]) => ({ front, back })) }); toast('Deck added', 'ok'); go('/study?tab=cards&r=' + Date.now()); } catch (e) { ev.target.disabled = false; fail(e); } } }, 'Add')))), actions: [{ label: 'Close' }] });
+  mount(body, h('div', { class: 'row', style: { marginBottom: '1rem' } }, h('button', { class: 'btn primary', type: 'button', onclick: create }, 'New deck'), h('button', { class: 'btn', type: 'button', onclick: starters }, 'Starter decks')),
     r.decks.length ? h('div', { class: 'grid2' }, r.decks.map(d => h('div', { class: 'block deck', style: { marginTop: 0 } }, h('h3', d.title), h('p', { class: 'muted' }, `${d.total} cards, ${d.due} due now`), h('div', { class: 'row' }, h('a', { class: 'btn primary sm' + (d.due ? '' : ' disabled'), href: '#/study?tab=cards&deck=' + d.id + '&mode=study', 'aria-disabled': String(!d.due) }, d.due ? `Study ${d.due}` : 'All caught up'), h('a', { class: 'btn sm', href: '#/study?tab=cards&deck=' + d.id + '&mode=edit' }, 'Edit cards'),
       h('button', { class: 'btn sm danger', type: 'button', onclick: async () => { if (await confirmBox(`Delete "${d.title}" and its ${d.total} cards?`, { yes: 'Delete', danger: true })) { await DEL('/decks/' + d.id); go('/study?tab=cards&r=' + Date.now()); } } }, 'Delete'))))) : empty('No decks yet', 'Make a deck, add questions and answers, and the app schedules each card for you.', h('button', { class: 'btn primary', onclick: create }, 'Create your first deck')));
 }
@@ -142,7 +157,11 @@ async function tasks(body) {
   t.addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
   const open = p.tasks.filter(x => !x.done), done = p.tasks.filter(x => x.done);
   const row = x => h('div', { class: 'item' + (x.done ? ' done' : '') }, h('input', { type: 'checkbox', checked: !!x.done, 'aria-label': 'Done: ' + x.title, onchange: async e => { await PUT('/tasks/' + x.id, { done: e.target.checked }); go('/study?tab=tasks&r=' + Date.now()); } }), h('div', { class: 'grow' }, h('strong', x.title), x.due_at && h('span', { class: 'meta' }, (x.due_at < Date.now() && !x.done ? 'Overdue: ' : 'Due ') + fmtDay(x.due_at))), x.priority === 2 && h('span', { class: 'chip ember' }, 'High'), h('button', { class: 'btn sm quiet', type: 'button', 'aria-label': 'Delete task', onclick: async () => { await DEL('/tasks/' + x.id); go('/study?tab=tasks&r=' + Date.now()); } }, icon('trash')));
+  const ideaList = h('div', { class: 'ideas' });
+  const showIdeas = subject => mount(ideaList, TASK_IDEAS.filter(x => x.subject === subject).map(x => h('button', { type: 'button', class: 'pick', onclick: () => { t.value = x.title; t.focus(); } }, x.title)));
+  const ideaSel = h('select', { 'aria-label': 'Subject for task ideas', onchange: e => showIdeas(e.target.value) }, SUBJECTS.map(x => h('option', { value: x }, x))); showIdeas(SUBJECTS[0]);
   mount(body, h('div', { class: 'row', style: { marginBottom: '1rem' } }, h('div', { class: 'grow' }, t), due, pri, h('button', { class: 'btn primary', type: 'button', onclick: add }, 'Add')),
+    h('details', { class: 'block', style: { marginTop: 0 } }, h('summary', `Pick from ${TASK_IDEAS.length} task ideas`), h('div', { class: 'row', style: { margin: '.6rem 0' } }, ideaSel, h('span', { class: 'muted small' }, 'Tap one to put it in the box above, then set a date and add it.')), ideaList),
     open.length ? h('div', { class: 'list' }, open.map(row)) : empty('No open tasks', 'Add homework, revision and reminders. Tasks with a due date also appear in your calendar.'), done.length > 0 && h('details', { style: { marginTop: '1rem' } }, h('summary', `${done.length} completed`), h('div', { class: 'list' }, done.map(row))));
 }
 
